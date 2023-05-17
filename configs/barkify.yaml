@@ -1,0 +1,106 @@
+name: ljspeech
+stage: 1
+start_path: ???
+
+common:
+  trainer:
+    accelerator: "gpu"
+    # strategy: "deepspeed"
+    # strategy: "ddp_find_unused_parameters_false"
+    strategy: null
+    precision: 16 # 32
+
+  ckpt:
+    mode: "min" 
+    monitor: "val_loss"
+    save_top_k: 3
+    every_n_epochs: 10
+    save_weights_only: false 
+
+stage1:
+  ############# create dataset #############
+  tokenizer: null
+  dataset: 
+    start_path: ${start_path}
+    add_prompt: false
+    
+  collate_fn:
+    text_window: 256
+    semantic_window: 768
+    text_token_num: 210
+
+  dataloader:
+    batch_size: 128
+    shuffle: True 
+    num_workers: 32
+    persistent_workers: True
+    pin_memory: True
+  
+  ############## model params ##############
+  model:
+    n_layer: 6
+    n_head: 4
+    n_embd: 512
+    block_size: 1026 # 256(text_window) + 768(semantic) + 2(infer token, eos)
+    bias: False 
+    dropout: 0.1 
+    input_vocab_size: 2261 # 210(pinyin) + 2048(semantic) + 3(infer, pad_text, pad_semantic) 
+    output_vocab_size: 2261
+
+  ############## optim params ##############
+  optim:
+    lr: 1e-4 
+    min_lr: 2e-5
+    weight_decay: 1e-3
+    warmup_iters: 1000
+    max_iters: 10000 # depends on your GPUs.
+    lr_strategy: 'cosine'
+    gradient_clip: 1
+
+stage2:
+  ############# create dataset #############
+  tokenizer: null
+  dataset: 
+    start_path: ${start_path}
+    add_prompt: false
+    
+  collate_fn:
+    Q_size: 2 # num of acoustic token to predict 
+    semantic_to_coarse_ratio: 3
+    semantic_window: 256
+    semantic_token_num: 2048
+    coarse_num: 1024
+    slice_range: 60 # shift window size at inference in bark's source code
+
+  dataloader:
+    batch_size: 128
+    shuffle: True 
+    num_workers: 32
+    persistent_workers: True
+    pin_memory: True
+  
+  ############## model params ##############
+  model:
+    n_layer: 6
+    n_head: 4 
+    n_embd: 512 
+    block_size: 1025 # 256(semantic_window) + 256*3(window X ratio) + 1(infer token)
+    bias: False
+    dropout: 0.1
+    input_vocab_size: 4098 # 2048(semantic) + 1024*2(coarse X Q_size) + 2(infer token, padding)
+    output_vocab_size: 4098
+
+  ############## optim params ##############
+  optim:
+    lr: 1e-4 
+    min_lr: 2e-5
+    weight_decay: 1e-3
+    warmup_iters: 1000
+    max_iters: 20000 # depends on your GPUs.
+    lr_strategy: 'cosine'
+    gradient_clip: 1
+
+
+hydra:
+  run:
+    dir: ${start_path}/${name}/stage_${stage}
